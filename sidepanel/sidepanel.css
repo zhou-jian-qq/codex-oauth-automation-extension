@@ -1,0 +1,146 @@
+/* sidepanel/sidepanel.css */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #333;
+  background: #f8f9fa;
+  padding: 12px;
+  width: 100%;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+header h1 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#btn-reset {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#btn-reset:hover { background: #c82333; }
+
+/* Data Section */
+#data-section {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.data-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.data-row:last-child { margin-bottom: 0; }
+
+.data-row label {
+  width: 80px;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.data-value {
+  font-size: 12px;
+  color: #999;
+  word-break: break-all;
+}
+
+.data-value.has-value {
+  color: #333;
+}
+
+#input-email {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Steps Section */
+#steps-section {
+  margin-bottom: 12px;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.step-num {
+  width: 20px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+}
+
+.step-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.step-btn:hover:not(:disabled) { background: #0069d9; }
+.step-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.step-status {
+  width: 24px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* Log Section */
+#log-section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+#log-area {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px;
+  border-radius: 6px;
+  height: 250px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-info { color: #d4d4d4; }
+.log-ok { color: #4ec9b0; }
+.log-warn { color: #dcdcaa; }
+.log-error { color: #f44747; }
