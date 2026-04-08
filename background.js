@@ -1759,7 +1759,17 @@ async function resolveVerificationStep(step, state, mail, options = {}) {
   }
 
   let nextFilterAfterTimestamp = options.filterAfterTimestamp ?? null;
+  const requestFreshCodeFirst = Boolean(options.requestFreshCodeFirst);
   const maxSubmitAttempts = 3;
+
+  if (requestFreshCodeFirst) {
+    try {
+      nextFilterAfterTimestamp = await requestVerificationCodeResend(step);
+      await addLog(`步骤 ${step}：已先请求一封新的${getVerificationCodeLabel(step)}验证码，再开始轮询邮箱。`, 'warn');
+    } catch (err) {
+      await addLog(`步骤 ${step}：首次重新获取验证码失败：${err.message}，将继续使用当前时间窗口轮询。`, 'warn');
+    }
+  }
 
   for (let attempt = 1; attempt <= maxSubmitAttempts; attempt++) {
     const result = await pollFreshVerificationCode(step, state, mail, {
@@ -1851,7 +1861,10 @@ async function executeStep4(state) {
     });
   }
 
-  await resolveVerificationStep(4, state, mail, { filterAfterTimestamp: stepStartedAt });
+  await resolveVerificationStep(4, state, mail, {
+    filterAfterTimestamp: stepStartedAt,
+    requestFreshCodeFirst: true,
+  });
   return;
 }
 
@@ -1966,7 +1979,10 @@ async function executeStep7(state) {
     });
   }
 
-  await resolveVerificationStep(7, state, mail, { filterAfterTimestamp: stepStartedAt });
+  await resolveVerificationStep(7, state, mail, {
+    filterAfterTimestamp: stepStartedAt,
+    requestFreshCodeFirst: true,
+  });
   return;
 }
 
