@@ -396,7 +396,9 @@ async function step3_fillEmailPassword(payload) {
 
 const INVALID_VERIFICATION_CODE_PATTERN = /代码不正确|验证码不正确|验证码错误|code\s+(?:is\s+)?incorrect|invalid\s+code|incorrect\s+code|try\s+again/i;
 const VERIFICATION_PAGE_PATTERN = /检查您的收件箱|输入我们刚刚向|重新发送电子邮件|重新发送验证码|验证码|代码不正确|email\s+verification/i;
-const OAUTH_CONSENT_PAGE_PATTERN = /使用\s*ChatGPT\s*登录到\s*Codex|login\s+to\s+codex|log\s+in\s+to\s+codex|authorize|授权/i;
+const OAUTH_CONSENT_PAGE_PATTERN = /使用\s*ChatGPT\s*登录到\s*Codex|sign\s+in\s+to\s+codex(?:\s+with\s+chatgpt)?|login\s+to\s+codex|log\s+in\s+to\s+codex|authorize|授权/i;
+const OAUTH_CONSENT_FORM_SELECTOR = 'form[action*="/sign-in-with-chatgpt/" i][action*="/consent" i]';
+const CONTINUE_ACTION_PATTERN = /继续|continue/i;
 const ADD_PHONE_PAGE_PATTERN = /add[\s-]*phone|添加手机号|手机号码|手机号|phone\s+number|telephone/i;
 const STEP5_SUBMIT_ERROR_PATTERN = /无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|something\s+went\s+wrong|invalid\s+(?:birthday|birth|date)|生日|出生日期/i;
 const AUTH_TIMEOUT_ERROR_TITLE_PATTERN = /糟糕，出错了|something\s+went\s+wrong|oops/i;
@@ -449,16 +451,60 @@ function getPageTextSnapshot() {
     .trim();
 }
 
+function getOAuthConsentForm() {
+  return document.querySelector(OAUTH_CONSENT_FORM_SELECTOR);
+}
+
 function getPrimaryContinueButton() {
+  const consentForm = getOAuthConsentForm();
+  if (consentForm) {
+    const formButtons = Array.from(
+      consentForm.querySelectorAll('button[type="submit"], input[type="submit"], [role="button"]')
+    );
+
+    const formContinueButton = formButtons.find((el) => {
+      if (!isVisibleElement(el)) return false;
+
+      const ddActionName = el.getAttribute?.('data-dd-action-name') || '';
+      return ddActionName === 'Continue' || CONTINUE_ACTION_PATTERN.test(getActionText(el));
+    });
+    if (formContinueButton) {
+      return formContinueButton;
+    }
+
+    const firstVisibleSubmit = formButtons.find(isVisibleElement);
+    if (firstVisibleSubmit) {
+      return firstVisibleSubmit;
+    }
+  }
+
   const continueBtn = document.querySelector(
-    'button[type="submit"][data-dd-action-name="Continue"], button[type="submit"]._primary_3rdp0_107'
+    `${OAUTH_CONSENT_FORM_SELECTOR} button[type="submit"], button[type="submit"][data-dd-action-name="Continue"], button[type="submit"]._primary_3rdp0_107`
   );
   if (continueBtn && isVisibleElement(continueBtn)) {
     return continueBtn;
   }
 
   const buttons = document.querySelectorAll('button, [role="button"]');
-  return Array.from(buttons).find((el) => isVisibleElement(el) && /继续|Continue/i.test(el.textContent || '')) || null;
+  return Array.from(buttons).find((el) => {
+    if (!isVisibleElement(el)) return false;
+
+    const ddActionName = el.getAttribute?.('data-dd-action-name') || '';
+    return ddActionName === 'Continue' || CONTINUE_ACTION_PATTERN.test(getActionText(el));
+  }) || null;
+}
+
+function isOAuthConsentPage() {
+  const pageText = getPageTextSnapshot();
+  if (OAUTH_CONSENT_PAGE_PATTERN.test(pageText)) {
+    return true;
+  }
+
+  if (getOAuthConsentForm()) {
+    return true;
+  }
+
+  return /\bcodex\b/i.test(pageText) && /\bchatgpt\b/i.test(pageText) && Boolean(getPrimaryContinueButton());
 }
 
 function isVerificationPageStillVisible() {
@@ -493,7 +539,7 @@ function isStep8Ready() {
   if (isVerificationPageStillVisible()) return false;
   if (isAddPhonePageReady()) return false;
 
-  return OAUTH_CONSENT_PAGE_PATTERN.test(getPageTextSnapshot());
+  return isOAuthConsentPage();
 }
 
 function normalizeInlineText(text) {
@@ -991,11 +1037,10 @@ async function step8_findAndClick() {
 }
 
 function getStep8State() {
-  const pageText = getPageTextSnapshot();
   const continueBtn = getPrimaryContinueButton();
   const state = {
     url: location.href,
-    consentPage: OAUTH_CONSENT_PAGE_PATTERN.test(pageText),
+    consentPage: isOAuthConsentPage(),
     consentReady: isStep8Ready(),
     verificationPage: isVerificationPageStillVisible(),
     addPhonePage: isAddPhonePageReady(),
