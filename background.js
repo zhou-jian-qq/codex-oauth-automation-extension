@@ -39,6 +39,7 @@ const DEFAULT_SUB2API_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 const AUTO_RUN_ALARM_NAME = 'scheduled-auto-run';
 const AUTO_RUN_DELAY_MIN_MINUTES = 1;
 const AUTO_RUN_DELAY_MAX_MINUTES = 1440;
+const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 
 initializeSessionStorageAccess();
 
@@ -50,6 +51,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   panelMode: 'cpa', // Step 1 / Step 9 的来源模式：cpa | sub2api。
   vpsUrl: '', // VPS 面板地址，可手动填写。
   vpsPassword: '', // VPS 面板登录密码，可手动填写。
+  localCpaStep9Mode: DEFAULT_LOCAL_CPA_STEP9_MODE, // 本地 CPA 的第 9 步策略：submit | bypass。
   sub2apiUrl: DEFAULT_SUB2API_URL, // SUB2API 管理后台地址。
   sub2apiEmail: '', // SUB2API 登录邮箱。
   sub2apiPassword: '', // SUB2API 登录密码。
@@ -68,6 +70,8 @@ const PERSISTED_SETTING_DEFAULTS = {
 };
 
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
+const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
+const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 
 const DEFAULT_STATE = {
   currentStep: 0, // 当前流程执行到的步骤编号。
@@ -139,6 +143,30 @@ function normalizeEmailGenerator(value = '') {
   return String(value || '').trim().toLowerCase() === 'cloudflare' ? 'cloudflare' : 'duck';
 }
 
+function normalizePanelMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'sub2api' ? 'sub2api' : 'cpa';
+}
+
+function normalizeMailProvider(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  switch (normalized) {
+    case HOTMAIL_PROVIDER:
+    case '163':
+    case '163-vip':
+    case 'qq':
+    case 'inbucket':
+      return normalized;
+    default:
+      return PERSISTED_SETTING_DEFAULTS.mailProvider;
+  }
+}
+
+function normalizeLocalCpaStep9Mode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'bypass'
+    ? 'bypass'
+    : DEFAULT_LOCAL_CPA_STEP9_MODE;
+}
+
 function normalizeCloudflareDomain(rawValue = '') {
   let value = String(rawValue || '').trim().toLowerCase();
   if (!value) return '';
@@ -149,17 +177,99 @@ function normalizeCloudflareDomain(rawValue = '') {
   return value;
 }
 
+function normalizeCloudflareDomains(values) {
+  const normalizedDomains = [];
+  const seen = new Set();
+
+  for (const value of Array.isArray(values) ? values : []) {
+    const normalized = normalizeCloudflareDomain(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    normalizedDomains.push(normalized);
+  }
+
+  return normalizedDomains;
+}
+
+function normalizePersistentSettingValue(key, value) {
+  switch (key) {
+    case 'panelMode':
+      return normalizePanelMode(value);
+    case 'vpsUrl':
+      return String(value || '').trim();
+    case 'vpsPassword':
+      return String(value || '');
+    case 'localCpaStep9Mode':
+      return normalizeLocalCpaStep9Mode(value);
+    case 'sub2apiUrl':
+      return String(value || '').trim();
+    case 'sub2apiEmail':
+      return String(value || '').trim();
+    case 'sub2apiPassword':
+      return String(value || '');
+    case 'sub2apiGroupName':
+      return String(value || '').trim();
+    case 'customPassword':
+      return String(value || '');
+    case 'autoRunSkipFailures':
+    case 'autoRunDelayEnabled':
+      return Boolean(value);
+    case 'autoRunDelayMinutes':
+      return normalizeAutoRunDelayMinutes(value);
+    case 'mailProvider':
+      return normalizeMailProvider(value);
+    case 'emailGenerator':
+      return normalizeEmailGenerator(value);
+    case 'inbucketHost':
+      return String(value || '').trim();
+    case 'inbucketMailbox':
+      return String(value || '').trim();
+    case 'cloudflareDomain':
+      return normalizeCloudflareDomain(value);
+    case 'cloudflareDomains':
+      return normalizeCloudflareDomains(value);
+    case 'hotmailAccounts':
+      return normalizeHotmailAccounts(value);
+    default:
+      return value;
+  }
+}
+
+function buildPersistentSettingsPayload(input = {}, options = {}) {
+  const { fillDefaults = false, requireKnownKeys = false } = options;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('\u914d\u7f6e\u5185\u5bb9\u683c\u5f0f\u65e0\u6548\u3002');
+  }
+
+  const payload = {};
+  let matchedKeyCount = 0;
+  for (const key of PERSISTED_SETTING_KEYS) {
+    if (input[key] !== undefined) {
+      payload[key] = normalizePersistentSettingValue(key, input[key]);
+      matchedKeyCount += 1;
+    } else if (fillDefaults) {
+      payload[key] = normalizePersistentSettingValue(key, PERSISTED_SETTING_DEFAULTS[key]);
+    }
+  }
+
+  if (requireKnownKeys && matchedKeyCount === 0) {
+    throw new Error('\u914d\u7f6e\u6587\u4ef6\u4e2d\u6ca1\u6709\u53ef\u8bc6\u522b\u7684\u914d\u7f6e\u5185\u5bb9\u3002');
+  }
+
+  if (payload.cloudflareDomains) {
+    const domains = normalizeCloudflareDomains(payload.cloudflareDomains);
+    if (payload.cloudflareDomain && !domains.includes(payload.cloudflareDomain)) {
+      domains.unshift(payload.cloudflareDomain);
+    }
+    payload.cloudflareDomains = domains;
+  }
+
+  return payload;
+}
+
 async function getPersistedSettings() {
   const stored = await chrome.storage.local.get(PERSISTED_SETTING_KEYS);
-  return {
-    ...PERSISTED_SETTING_DEFAULTS,
-    ...stored,
-    autoRunSkipFailures: Boolean(stored.autoRunSkipFailures ?? PERSISTED_SETTING_DEFAULTS.autoRunSkipFailures),
-    autoRunDelayEnabled: Boolean(stored.autoRunDelayEnabled ?? PERSISTED_SETTING_DEFAULTS.autoRunDelayEnabled),
-    autoRunDelayMinutes: normalizeAutoRunDelayMinutes(stored.autoRunDelayMinutes ?? PERSISTED_SETTING_DEFAULTS.autoRunDelayMinutes),
-    emailGenerator: normalizeEmailGenerator(stored.emailGenerator ?? PERSISTED_SETTING_DEFAULTS.emailGenerator),
-    hotmailAccounts: normalizeHotmailAccounts(stored.hotmailAccounts),
-  };
+  return buildPersistentSettingsPayload(stored, { fillDefaults: true });
 }
 
 async function getState() {
@@ -191,24 +301,73 @@ async function setState(updates) {
 }
 
 async function setPersistentSettings(updates) {
-  const persistedUpdates = {};
-  for (const key of PERSISTED_SETTING_KEYS) {
-    if (updates[key] !== undefined) {
-      if (key === 'autoRunSkipFailures' || key === 'autoRunDelayEnabled') {
-        persistedUpdates[key] = Boolean(updates[key]);
-      } else if (key === 'autoRunDelayMinutes') {
-        persistedUpdates[key] = normalizeAutoRunDelayMinutes(updates[key]);
-      } else if (key === 'hotmailAccounts') {
-        persistedUpdates[key] = normalizeHotmailAccounts(updates[key]);
-      } else {
-        persistedUpdates[key] = updates[key];
-      }
-    }
-  }
+  const persistedUpdates = buildPersistentSettingsPayload(updates);
 
   if (Object.keys(persistedUpdates).length > 0) {
     await chrome.storage.local.set(persistedUpdates);
   }
+}
+
+function buildSettingsExportFilename(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${SETTINGS_EXPORT_FILENAME_PREFIX}-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.json`;
+}
+
+async function exportSettingsBundle() {
+  const settings = await getPersistedSettings();
+  const bundle = {
+    schemaVersion: SETTINGS_EXPORT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    settings,
+  };
+
+  return {
+    fileName: buildSettingsExportFilename(),
+    fileContent: JSON.stringify(bundle, null, 2),
+  };
+}
+
+async function importSettingsBundle(configBundle) {
+  const state = await ensureManualInteractionAllowed('\u5bfc\u5165\u914d\u7f6e');
+  if (Object.values(state.stepStatuses || {}).some((status) => status === 'running')) {
+    throw new Error('\u5f53\u524d\u6709\u6b65\u9aa4\u6b63\u5728\u6267\u884c\uff0c\u65e0\u6cd5\u5bfc\u5165\u914d\u7f6e\u3002');
+  }
+  if (!configBundle || typeof configBundle !== 'object' || Array.isArray(configBundle)) {
+    throw new Error('\u914d\u7f6e\u6587\u4ef6\u5185\u5bb9\u65e0\u6548\u3002');
+  }
+
+  const schemaVersion = Number(configBundle.schemaVersion);
+  if (schemaVersion !== SETTINGS_EXPORT_SCHEMA_VERSION) {
+    throw new Error(`\u4ec5\u652f\u6301\u5bfc\u5165 schemaVersion=${SETTINGS_EXPORT_SCHEMA_VERSION} \u7684\u914d\u7f6e\u6587\u4ef6\u3002`);
+  }
+  if (!configBundle.settings || typeof configBundle.settings !== 'object' || Array.isArray(configBundle.settings)) {
+    throw new Error('\u914d\u7f6e\u6587\u4ef6\u7f3a\u5c11 settings \u914d\u7f6e\u6bb5\u3002');
+  }
+
+  const importedSettings = buildPersistentSettingsPayload(configBundle.settings, {
+    fillDefaults: true,
+    requireKnownKeys: true,
+  });
+
+  await setPersistentSettings(importedSettings);
+
+  const sessionUpdates = {
+    ...importedSettings,
+    currentHotmailAccountId: null,
+  };
+  if (importedSettings.mailProvider === HOTMAIL_PROVIDER) {
+    sessionUpdates.email = null;
+  }
+
+  await setState(sessionUpdates);
+  broadcastDataUpdate({
+    ...importedSettings,
+    currentHotmailAccountId: null,
+    ...(sessionUpdates.email !== undefined ? { email: sessionUpdates.email } : {}),
+  });
+
+  return getState();
 }
 
 function broadcastDataUpdate(payload) {
@@ -218,9 +377,13 @@ function broadcastDataUpdate(payload) {
   }).catch(() => { });
 }
 
-async function setEmailState(email) {
+async function setEmailStateSilently(email) {
   await setState({ email });
   broadcastDataUpdate({ email });
+}
+
+async function setEmailState(email) {
+  await setEmailStateSilently(email);
   if (email) {
     await resumeAutoRunIfWaitingForEmail();
   }
@@ -983,7 +1146,9 @@ function isLocalCpaUrl(rawUrl) {
 }
 
 function shouldBypassStep9ForLocalCpa(state) {
-  return Boolean(state?.localhostUrl) && isLocalCpaUrl(state?.vpsUrl);
+  return normalizeLocalCpaStep9Mode(state?.localCpaStep9Mode) === 'bypass'
+    && Boolean(state?.localhostUrl)
+    && isLocalCpaUrl(state?.vpsUrl);
 }
 
 function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
@@ -1881,6 +2046,13 @@ function clearStopRequest() {
   stopRequested = false;
 }
 
+function getRunningSteps(statuses = {}) {
+  return Object.entries({ ...DEFAULT_STATE.stepStatuses, ...statuses })
+    .filter(([, status]) => status === 'running')
+    .map(([step]) => Number(step))
+    .sort((a, b) => a - b);
+}
+
 function getAutoRunStatusPayload(phase, payload = {}) {
   const currentRun = payload.currentRun ?? autoRunCurrentRun;
   const totalRuns = payload.totalRuns ?? autoRunTotalRuns;
@@ -1889,7 +2061,7 @@ function getAutoRunStatusPayload(phase, payload = {}) {
     ? (payload.scheduledAt ?? payload.scheduledAutoRunAt ?? null)
     : null;
   const scheduledAt = rawScheduledAt === null ? null : Number(rawScheduledAt);
-  const autoRunning = phase === 'scheduled' || phase === 'running' || phase === 'waiting_email' || phase === 'retrying';
+  const autoRunning = phase === 'scheduled' || phase === 'running' || phase === 'waiting_step' || phase === 'waiting_email' || phase === 'retrying';
 
   return {
     autoRunning,
@@ -1924,7 +2096,7 @@ async function broadcastAutoRunStatus(phase, payload = {}, extraState = {}) {
 }
 
 function isAutoRunLockedState(state) {
-  return Boolean(state.autoRunning) && (state.autoRunPhase === 'running' || state.autoRunPhase === 'retrying');
+  return Boolean(state.autoRunning) && (state.autoRunPhase === 'running' || state.autoRunPhase === 'waiting_step' || state.autoRunPhase === 'retrying');
 }
 
 function isAutoRunPausedState(state) {
@@ -2211,6 +2383,7 @@ async function humanStepDelay(min = HUMAN_STEP_DELAY_MIN, max = HUMAN_STEP_DELAY
 }
 
 async function clickWithDebugger(tabId, rect) {
+  throwIfStopped();
   if (!tabId) {
     throw new Error('未找到用于调试点击的认证页面标签页。');
   }
@@ -2229,10 +2402,12 @@ async function clickWithDebugger(tabId, rect) {
   }
 
   try {
+    throwIfStopped();
     const x = Math.round(rect.centerX);
     const y = Math.round(rect.centerY);
 
     await chrome.debugger.sendCommand(target, 'Page.bringToFront');
+    throwIfStopped();
     await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x,
@@ -2241,6 +2416,7 @@ async function clickWithDebugger(tabId, rect) {
       buttons: 0,
       clickCount: 0,
     });
+    throwIfStopped();
     await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
       type: 'mousePressed',
       x,
@@ -2249,6 +2425,7 @@ async function clickWithDebugger(tabId, rect) {
       buttons: 1,
       clickCount: 1,
     });
+    throwIfStopped();
     await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
       type: 'mouseReleased',
       x,
@@ -2430,29 +2607,19 @@ async function handleMessage(message, sender) {
     }
 
     case 'SAVE_SETTING': {
-      const updates = {};
-      if (message.payload.panelMode !== undefined) updates.panelMode = message.payload.panelMode;
-      if (message.payload.vpsUrl !== undefined) updates.vpsUrl = message.payload.vpsUrl;
-      if (message.payload.vpsPassword !== undefined) updates.vpsPassword = message.payload.vpsPassword;
-      if (message.payload.sub2apiUrl !== undefined) updates.sub2apiUrl = message.payload.sub2apiUrl;
-      if (message.payload.sub2apiEmail !== undefined) updates.sub2apiEmail = message.payload.sub2apiEmail;
-      if (message.payload.sub2apiPassword !== undefined) updates.sub2apiPassword = message.payload.sub2apiPassword;
-      if (message.payload.sub2apiGroupName !== undefined) updates.sub2apiGroupName = message.payload.sub2apiGroupName;
-      if (message.payload.customPassword !== undefined) updates.customPassword = message.payload.customPassword;
-      if (message.payload.autoRunSkipFailures !== undefined) updates.autoRunSkipFailures = Boolean(message.payload.autoRunSkipFailures);
-      if (message.payload.autoRunDelayEnabled !== undefined) updates.autoRunDelayEnabled = Boolean(message.payload.autoRunDelayEnabled);
-      if (message.payload.autoRunDelayMinutes !== undefined) updates.autoRunDelayMinutes = normalizeAutoRunDelayMinutes(message.payload.autoRunDelayMinutes);
-      if (message.payload.mailProvider !== undefined) updates.mailProvider = message.payload.mailProvider;
-      if (message.payload.emailGenerator !== undefined) updates.emailGenerator = normalizeEmailGenerator(message.payload.emailGenerator);
-      if (message.payload.inbucketHost !== undefined) updates.inbucketHost = message.payload.inbucketHost;
-      if (message.payload.inbucketMailbox !== undefined) updates.inbucketMailbox = message.payload.inbucketMailbox;
-      if (message.payload.cloudflareDomain !== undefined) updates.cloudflareDomain = normalizeCloudflareDomain(message.payload.cloudflareDomain);
-      if (message.payload.cloudflareDomains !== undefined) updates.cloudflareDomains = Array.isArray(message.payload.cloudflareDomains)
-        ? message.payload.cloudflareDomains.map(domain => normalizeCloudflareDomain(domain)).filter(Boolean)
-        : [];
+      const updates = buildPersistentSettingsPayload(message.payload || {});
       await setPersistentSettings(updates);
       await setState(updates);
       return { ok: true };
+    }
+
+    case 'EXPORT_SETTINGS': {
+      return { ok: true, ...(await exportSettingsBundle()) };
+    }
+
+    case 'IMPORT_SETTINGS': {
+      const state = await importSettingsBundle(message.payload?.config || null);
+      return { ok: true, state };
     }
 
     case 'UPSERT_HOTMAIL_ACCOUNT': {
@@ -2513,6 +2680,16 @@ async function handleMessage(message, sender) {
     }
 
     // Side panel data updates
+    case 'SET_EMAIL_STATE': {
+      const state = await getState();
+      if (isAutoRunLockedState(state)) {
+        throw new Error('自动流程运行中，当前不能手动修改邮箱。');
+      }
+      const email = String(message.payload?.email || '').trim() || null;
+      await setEmailStateSilently(email);
+      return { ok: true, email };
+    }
+
     case 'SAVE_EMAIL': {
       const state = await getState();
       if (isAutoRunLockedState(state)) {
@@ -2688,11 +2865,29 @@ async function completeStepFromBackground(step, payload = {}) {
   notifyStepComplete(step, payload);
 }
 
+async function waitForRunningStepsToFinish(payload = {}) {
+  let currentState = await getState();
+  let runningSteps = getRunningSteps(currentState.stepStatuses);
+  if (!runningSteps.length) {
+    return currentState;
+  }
+
+  await addLog(`自动继续：检测到步骤 ${runningSteps.join(', ')} 正在运行，等待完成后再继续自动流程...`, 'info');
+  await broadcastAutoRunStatus('waiting_step', payload);
+
+  while (runningSteps.length) {
+    await sleepWithStop(250);
+    currentState = await getState();
+    runningSteps = getRunningSteps(currentState.stepStatuses);
+  }
+
+  await addLog('自动继续：当前运行步骤已结束，准备按最新进度继续自动流程...', 'info');
+  return currentState;
+}
+
 async function markRunningStepsStopped() {
   const state = await getState();
-  const runningSteps = Object.entries(state.stepStatuses || {})
-    .filter(([, status]) => status === 'running')
-    .map(([step]) => Number(step));
+  const runningSteps = getRunningSteps(state.stepStatuses);
 
   for (const step of runningSteps) {
     await setStepStatus(step, 'stopped');
@@ -3083,10 +3278,14 @@ async function autoRunLoop(totalRuns, options = {}) {
   let attemptRuns = Math.max(0, resumeAttemptRunsProcessed);
   let forceFreshTabsNextRun = false;
   let continueCurrentOnFirstAttempt = initialMode === 'continue';
+  const initialState = await getState();
+  const initialPhase = continueCurrentOnFirstAttempt && getRunningSteps(initialState.stepStatuses).length
+    ? 'waiting_step'
+    : 'running';
 
   await setState({
     autoRunSkipFailures,
-    ...getAutoRunStatusPayload('running', {
+    ...getAutoRunStatusPayload(initialPhase, {
       currentRun: resumeCurrentRun,
       totalRuns,
       attemptRun: resumeAttemptRunsProcessed,
@@ -3102,7 +3301,14 @@ async function autoRunLoop(totalRuns, options = {}) {
     let useExistingProgress = false;
 
     if (continueCurrentOnFirstAttempt) {
-      const currentState = await getState();
+      let currentState = await getState();
+      if (getRunningSteps(currentState.stepStatuses).length) {
+        currentState = await waitForRunningStepsToFinish({
+          currentRun: targetRun,
+          totalRuns,
+          attemptRun: attemptRuns,
+        });
+      }
       const resumeStep = getFirstUnfinishedStep(currentState.stepStatuses);
       if (resumeStep && hasSavedProgress(currentState.stepStatuses)) {
         startStep = resumeStep;
@@ -4415,7 +4621,7 @@ async function executeCpaStep9(state) {
   }
 
   if (shouldBypassStep9ForLocalCpa(state)) {
-    await addLog('步骤 9：检测到本地 CPA，步骤 8 完成后已自动添加，无需重复提交回调地址。', 'info');
+    await addLog('步骤 9：检测到本地 CPA，且当前策略为“跳过第9步”，本轮不再重复提交回调地址。', 'info');
     await completeStepFromBackground(9, {
       localhostUrl: state.localhostUrl,
       verifiedStatus: 'local-auto',

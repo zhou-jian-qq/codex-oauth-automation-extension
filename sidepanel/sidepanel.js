@@ -11,6 +11,7 @@ const STATUS_ICONS = {
 };
 
 const logArea = document.getElementById('log-area');
+const settingsCard = document.getElementById('settings-card');
 const displayOauthUrl = document.getElementById('display-oauth-url');
 const displayLocalhostUrl = document.getElementById('display-localhost-url');
 const displayStatus = document.getElementById('display-status');
@@ -18,6 +19,7 @@ const statusBar = document.getElementById('status-bar');
 const inputEmail = document.getElementById('input-email');
 const inputPassword = document.getElementById('input-password');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
+const btnToggleVpsPassword = document.getElementById('btn-toggle-vps-password');
 const btnFetchEmail = document.getElementById('btn-fetch-email');
 const btnTogglePassword = document.getElementById('btn-toggle-password');
 const btnSaveSettings = document.getElementById('btn-save-settings');
@@ -33,11 +35,19 @@ const autoScheduleMeta = document.getElementById('auto-schedule-meta');
 const btnAutoRunNow = document.getElementById('btn-auto-run-now');
 const btnAutoCancelSchedule = document.getElementById('btn-auto-cancel-schedule');
 const btnClearLog = document.getElementById('btn-clear-log');
+const configMenuShell = document.getElementById('config-menu-shell');
+const btnConfigMenu = document.getElementById('btn-config-menu');
+const configMenu = document.getElementById('config-menu');
+const btnExportSettings = document.getElementById('btn-export-settings');
+const btnImportSettings = document.getElementById('btn-import-settings');
+const inputImportSettingsFile = document.getElementById('input-import-settings-file');
 const selectPanelMode = document.getElementById('select-panel-mode');
 const rowVpsUrl = document.getElementById('row-vps-url');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const rowVpsPassword = document.getElementById('row-vps-password');
 const inputVpsPassword = document.getElementById('input-vps-password');
+const rowLocalCpaStep9Mode = document.getElementById('row-local-cpa-step9-mode');
+const localCpaStep9ModeButtons = Array.from(document.querySelectorAll('[data-local-cpa-step9-mode]'));
 const rowSub2ApiUrl = document.getElementById('row-sub2api-url');
 const inputSub2ApiUrl = document.getElementById('input-sub2api-url');
 const rowSub2ApiEmail = document.getElementById('row-sub2api-email');
@@ -96,6 +106,7 @@ const SKIPPABLE_STEPS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 const AUTO_DELAY_MIN_MINUTES = 1;
 const AUTO_DELAY_MAX_MINUTES = 1440;
 const AUTO_DELAY_DEFAULT_MINUTES = 30;
+const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 
 let latestState = null;
 let currentAutoRun = {
@@ -115,6 +126,8 @@ let currentModalActions = [];
 let scheduledCountdownTimer = null;
 let hotmailActionInFlight = false;
 let hotmailListExpanded = false;
+let configMenuOpen = false;
+let configActionInFlight = false;
 
 const EYE_OPEN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_CLOSED_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19C5 19 1 12 1 12a21.77 21.77 0 0 1 5.06-6.94"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.86 21.86 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>';
@@ -225,10 +238,14 @@ function openActionModal({ title, message, actions }) {
   });
 }
 
-function openAutoStartChoiceDialog(startStep) {
+function openAutoStartChoiceDialog(startStep, options = {}) {
+  const runningStep = Number.isInteger(options.runningStep) ? options.runningStep : null;
+  const continueMessage = runningStep
+    ? `继续当前会先等待步骤 ${runningStep} 完成，再按最新进度自动执行。`
+    : `继续当前会从步骤 ${startStep} 开始自动执行。`;
   return openActionModal({
     title: '启动自动',
-    message: `检测到当前已有流程进度。继续当前会从步骤 ${startStep} 开始自动执行，重新开始会清空当前流程进度并从步骤 1 新开一轮。`,
+    message: `检测到当前已有流程进度。${continueMessage}重新开始会清空当前流程进度并从步骤 1 新开一轮。`,
     actions: [
       { id: null, label: '取消', variant: 'btn-ghost' },
       { id: 'restart', label: '重新开始', variant: 'btn-outline' },
@@ -249,6 +266,71 @@ async function openConfirmModal({ title, message, confirmLabel = '确认', confi
   return choice === 'confirm';
 }
 
+function updateConfigMenuControls() {
+  const disabled = configActionInFlight || settingsSaveInFlight;
+  const importLocked = disabled
+    || currentAutoRun.autoRunning
+    || Object.values(getStepStatuses()).some((status) => status === 'running');
+  if (btnConfigMenu) {
+    btnConfigMenu.disabled = disabled;
+    btnConfigMenu.setAttribute('aria-expanded', String(configMenuOpen));
+  }
+  if (configMenu) {
+    configMenu.hidden = !configMenuOpen;
+  }
+  if (btnExportSettings) {
+    btnExportSettings.disabled = disabled;
+  }
+  if (btnImportSettings) {
+    btnImportSettings.disabled = importLocked;
+  }
+}
+
+function closeConfigMenu() {
+  configMenuOpen = false;
+  updateConfigMenuControls();
+}
+
+function openConfigMenu() {
+  configMenuOpen = true;
+  updateConfigMenuControls();
+}
+
+function toggleConfigMenu() {
+  configMenuOpen ? closeConfigMenu() : openConfigMenu();
+}
+
+async function waitForSettingsSaveIdle() {
+  while (settingsSaveInFlight) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function flushPendingSettingsBeforeExport() {
+  clearTimeout(settingsAutoSaveTimer);
+  await waitForSettingsSaveIdle();
+  if (settingsDirty) {
+    await saveSettings({ silent: true });
+  }
+}
+
+async function settlePendingSettingsBeforeImport() {
+  clearTimeout(settingsAutoSaveTimer);
+  await waitForSettingsSaveIdle();
+}
+
+function downloadTextFile(content, fileName, mimeType = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 function isDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
@@ -265,6 +347,14 @@ function getFirstUnfinishedStep(state = latestState) {
     }
   }
   return null;
+}
+
+function getRunningSteps(state = latestState) {
+  const statuses = getStepStatuses(state);
+  return Object.entries(statuses)
+    .filter(([, status]) => status === 'running')
+    .map(([step]) => Number(step))
+    .sort((a, b) => a - b);
 }
 
 function hasSavedProgress(state = latestState) {
@@ -293,7 +383,7 @@ function syncAutoRunState(source = {}) {
   const autoRunning = source.autoRunning !== undefined
     ? Boolean(source.autoRunning)
     : (source.autoRunPhase !== undefined || source.phase !== undefined
-      ? ['scheduled', 'running', 'waiting_email', 'retrying'].includes(phase)
+      ? ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying'].includes(phase)
       : currentAutoRun.autoRunning);
 
   currentAutoRun = {
@@ -307,11 +397,15 @@ function syncAutoRunState(source = {}) {
 }
 
 function isAutoRunLockedPhase() {
-  return currentAutoRun.phase === 'running' || currentAutoRun.phase === 'retrying';
+  return currentAutoRun.phase === 'running' || currentAutoRun.phase === 'waiting_step' || currentAutoRun.phase === 'retrying';
 }
 
 function isAutoRunPausedPhase() {
   return currentAutoRun.phase === 'waiting_email';
+}
+
+function isAutoRunWaitingStepPhase() {
+  return currentAutoRun.phase === 'waiting_step';
 }
 
 function isAutoRunScheduledPhase() {
@@ -492,6 +586,7 @@ function collectSettingsPayload() {
     panelMode: selectPanelMode.value,
     vpsUrl: inputVpsUrl.value.trim(),
     vpsPassword: inputVpsPassword.value,
+    localCpaStep9Mode: getSelectedLocalCpaStep9Mode(),
     sub2apiUrl: inputSub2ApiUrl.value.trim(),
     sub2apiEmail: inputSub2ApiEmail.value.trim(),
     sub2apiPassword: inputSub2ApiPassword.value,
@@ -509,6 +604,68 @@ function collectSettingsPayload() {
   };
 }
 
+function normalizeLocalCpaStep9Mode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'bypass'
+    ? 'bypass'
+    : DEFAULT_LOCAL_CPA_STEP9_MODE;
+}
+
+function getSelectedLocalCpaStep9Mode() {
+  const activeButton = localCpaStep9ModeButtons.find((button) => button.classList.contains('is-active'));
+  return normalizeLocalCpaStep9Mode(activeButton?.dataset.localCpaStep9Mode);
+}
+
+function setLocalCpaStep9Mode(mode) {
+  const resolvedMode = normalizeLocalCpaStep9Mode(mode);
+  localCpaStep9ModeButtons.forEach((button) => {
+    const active = button.dataset.localCpaStep9Mode === resolvedMode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function setSettingsCardLocked(locked) {
+  if (!settingsCard) {
+    return;
+  }
+  settingsCard.classList.toggle('is-locked', locked);
+  settingsCard.toggleAttribute('inert', locked);
+}
+
+async function setRuntimeEmailState(email) {
+  const normalizedEmail = String(email || '').trim() || null;
+  const response = await chrome.runtime.sendMessage({
+    type: 'SET_EMAIL_STATE',
+    source: 'sidepanel',
+    payload: { email: normalizedEmail },
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+
+  return normalizedEmail;
+}
+
+async function clearRegistrationEmail(options = {}) {
+  const { silent = false } = options;
+  if (!inputEmail.value.trim() && !latestState?.email) {
+    return;
+  }
+
+  inputEmail.value = '';
+  syncLatestState({ email: null });
+
+  try {
+    await setRuntimeEmailState(null);
+  } catch (err) {
+    if (!silent) {
+      showToast(`清空邮箱失败：${err.message}`, 'error');
+    }
+    throw err;
+  }
+}
+
 function markSettingsDirty(isDirty = true) {
   settingsDirty = isDirty;
   updateSaveButtonState();
@@ -516,6 +673,7 @@ function markSettingsDirty(isDirty = true) {
 
 function updateSaveButtonState() {
   btnSaveSettings.disabled = settingsSaveInFlight || !settingsDirty;
+  updateConfigMenuControls();
   btnSaveSettings.textContent = settingsSaveInFlight ? '保存中' : '保存';
 }
 
@@ -575,6 +733,9 @@ function applyAutoRunStatus(payload = currentAutoRun) {
   const locked = isAutoRunLockedPhase();
   const paused = isAutoRunPausedPhase();
   const scheduled = isAutoRunScheduledPhase();
+  const settingsCardLocked = scheduled || locked;
+
+  setSettingsCardLocked(settingsCardLocked);
 
   inputRunCount.disabled = currentAutoRun.autoRunning;
   btnAutoRun.disabled = currentAutoRun.autoRunning;
@@ -590,6 +751,10 @@ function applyAutoRunStatus(payload = currentAutoRun) {
     case 'scheduled':
       autoContinueBar.style.display = 'none';
       btnAutoRun.innerHTML = `已计划${runLabel}`;
+      break;
+    case 'waiting_step':
+      autoContinueBar.style.display = 'none';
+      btnAutoRun.innerHTML = `等待中${runLabel}`;
       break;
     case 'waiting_email':
       autoContinueBar.style.display = 'flex';
@@ -616,6 +781,7 @@ function applyAutoRunStatus(payload = currentAutoRun) {
   updateAutoDelayInputState();
   syncScheduledCountdownTicker();
   updateStopButtonState(scheduled || paused || locked || Object.values(getStepStatuses()).some(status => status === 'running'));
+  updateConfigMenuControls();
 }
 
 function initializeManualStepActions() {
@@ -653,11 +819,45 @@ function initializeManualStepActions() {
 // State Restore on load
 // ============================================================
 
+function applySettingsState(state) {
+  syncLatestState(state);
+  syncAutoRunState(state);
+
+  inputEmail.value = state?.email || '';
+  syncPasswordField(state || {});
+  inputVpsUrl.value = state?.vpsUrl || '';
+  inputVpsPassword.value = state?.vpsPassword || '';
+  setLocalCpaStep9Mode(state?.localCpaStep9Mode);
+  selectPanelMode.value = state?.panelMode || 'cpa';
+  inputSub2ApiUrl.value = state?.sub2apiUrl || '';
+  inputSub2ApiEmail.value = state?.sub2apiEmail || '';
+  inputSub2ApiPassword.value = state?.sub2apiPassword || '';
+  inputSub2ApiGroup.value = state?.sub2apiGroupName || '';
+  selectMailProvider.value = state?.mailProvider || '163';
+  selectEmailGenerator.value = state?.emailGenerator || 'duck';
+  inputInbucketHost.value = state?.inbucketHost || '';
+  inputInbucketMailbox.value = state?.inbucketMailbox || '';
+  renderCloudflareDomainOptions(state?.cloudflareDomain || '');
+  setCloudflareDomainEditMode(false, { clearInput: true });
+  inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
+  inputAutoDelayEnabled.checked = Boolean(state?.autoRunDelayEnabled);
+  inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state?.autoRunDelayMinutes));
+  if (state?.autoRunTotalRuns) {
+    inputRunCount.value = String(state.autoRunTotalRuns);
+  }
+
+  applyAutoRunStatus(state);
+  markSettingsDirty(false);
+  updateAutoDelayInputState();
+  updatePanelModeUI();
+  updateMailProviderUI();
+  updateButtonStates();
+}
+
 async function restoreState() {
   try {
     const state = await chrome.runtime.sendMessage({ type: 'GET_STATE', source: 'sidepanel' });
-    syncLatestState(state);
-    syncAutoRunState(state);
+    applySettingsState(state);
 
     if (state.oauthUrl) {
       displayOauthUrl.textContent = state.oauthUrl;
@@ -667,52 +867,6 @@ async function restoreState() {
       displayLocalhostUrl.textContent = state.localhostUrl;
       displayLocalhostUrl.classList.add('has-value');
     }
-    if (state.email) {
-      inputEmail.value = state.email;
-    }
-    syncPasswordField(state);
-    if (state.vpsUrl) {
-      inputVpsUrl.value = state.vpsUrl;
-    }
-    if (state.vpsPassword) {
-      inputVpsPassword.value = state.vpsPassword;
-    }
-    if (state.panelMode) {
-      selectPanelMode.value = state.panelMode;
-    }
-    if (state.sub2apiUrl) {
-      inputSub2ApiUrl.value = state.sub2apiUrl;
-    }
-    if (state.sub2apiEmail) {
-      inputSub2ApiEmail.value = state.sub2apiEmail;
-    }
-    if (state.sub2apiPassword) {
-      inputSub2ApiPassword.value = state.sub2apiPassword;
-    }
-    if (state.sub2apiGroupName) {
-      inputSub2ApiGroup.value = state.sub2apiGroupName;
-    }
-    if (state.mailProvider) {
-      selectMailProvider.value = state.mailProvider;
-    }
-    if (state.emailGenerator) {
-      selectEmailGenerator.value = state.emailGenerator;
-    }
-    if (state.inbucketHost) {
-      inputInbucketHost.value = state.inbucketHost;
-    }
-    if (state.inbucketMailbox) {
-      inputInbucketMailbox.value = state.inbucketMailbox;
-    }
-    renderCloudflareDomainOptions(state.cloudflareDomain || '');
-    setCloudflareDomainEditMode(false, { clearInput: true });
-    inputAutoSkipFailures.checked = Boolean(state.autoRunSkipFailures);
-    inputAutoDelayEnabled.checked = Boolean(state.autoRunDelayEnabled);
-    inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(state.autoRunDelayMinutes));
-    if (state.autoRunTotalRuns) {
-      inputRunCount.value = String(state.autoRunTotalRuns);
-    }
-
     if (state.stepStatuses) {
       for (const [step, status] of Object.entries(state.stepStatuses)) {
         updateStepUI(Number(step), status);
@@ -725,14 +879,8 @@ async function restoreState() {
       }
     }
 
-    applyAutoRunStatus(state);
-    markSettingsDirty(false);
-    updateAutoDelayInputState();
     updateStatusDisplay(latestState);
     updateProgressCounter();
-    updatePanelModeUI();
-    updateMailProviderUI();
-    updateButtonStates();
   } catch (err) {
     console.error('Failed to restore state:', err);
   }
@@ -1051,6 +1199,7 @@ function updatePanelModeUI() {
   const useSub2Api = selectPanelMode.value === 'sub2api';
   rowVpsUrl.style.display = useSub2Api ? 'none' : '';
   rowVpsPassword.style.display = useSub2Api ? 'none' : '';
+  rowLocalCpaStep9Mode.style.display = useSub2Api ? 'none' : '';
   rowSub2ApiUrl.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiEmail.style.display = useSub2Api ? '' : 'none';
   rowSub2ApiPassword.style.display = useSub2Api ? '' : 'none';
@@ -1084,6 +1233,7 @@ function updateStepUI(step, status) {
 
   updateButtonStates();
   updateProgressCounter();
+  updateConfigMenuControls();
 }
 
 function updateProgressCounter() {
@@ -1163,6 +1313,15 @@ function updateStatusDisplay(state) {
   if (isAutoRunPausedPhase()) {
     displayStatus.textContent = `自动已暂停${getAutoRunLabel()}，等待邮箱后继续`;
     statusBar.classList.add('paused');
+    return;
+  }
+
+  if (isAutoRunWaitingStepPhase()) {
+    const runningSteps = getRunningSteps(state);
+    displayStatus.textContent = runningSteps.length
+      ? `自动等待步骤 ${runningSteps.join(', ')} 完成后继续${getAutoRunLabel()}`
+      : `自动正在按最新进度准备继续${getAutoRunLabel()}`;
+    statusBar.classList.add('running');
     return;
   }
 
@@ -1295,6 +1454,93 @@ async function copyTextToClipboard(text) {
   await navigator.clipboard.writeText(value);
 }
 
+async function exportSettingsFile() {
+  closeConfigMenu();
+  configActionInFlight = true;
+  updateConfigMenuControls();
+
+  try {
+    await flushPendingSettingsBeforeExport();
+    const response = await chrome.runtime.sendMessage({
+      type: 'EXPORT_SETTINGS',
+      source: 'sidepanel',
+      payload: {},
+    });
+
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (!response?.fileContent || !response?.fileName) {
+      throw new Error('\u672a\u751f\u6210\u53ef\u4e0b\u8f7d\u7684\u914d\u7f6e\u6587\u4ef6\u3002');
+    }
+
+    downloadTextFile(response.fileContent, response.fileName);
+    showToast('\u914d\u7f6e\u5df2\u5bfc\u51fa\uff1a' + response.fileName, 'success', 2200);
+  } catch (err) {
+    showToast('\u5bfc\u51fa\u914d\u7f6e\u5931\u8d25\uff1a' + err.message, 'error');
+  } finally {
+    configActionInFlight = false;
+    updateConfigMenuControls();
+  }
+}
+
+async function importSettingsFromFile(file) {
+  if (!file) return;
+
+  configActionInFlight = true;
+  closeConfigMenu();
+  updateConfigMenuControls();
+
+  try {
+    await settlePendingSettingsBeforeImport();
+    const rawText = await file.text();
+
+    let parsedConfig = null;
+    try {
+      parsedConfig = JSON.parse(rawText);
+    } catch {
+      throw new Error('\u914d\u7f6e\u6587\u4ef6\u4e0d\u662f\u6709\u6548\u7684 JSON\u3002');
+    }
+
+    const confirmed = await openConfirmModal({
+      title: '\u5bfc\u5165\u914d\u7f6e',
+      message: '\u786e\u8ba4\u5bfc\u5165\u914d\u7f6e\u6587\u4ef6 "' + file.name + '" \u5417\uff1f\u5bfc\u5165\u540e\u4f1a\u8986\u76d6\u5f53\u524d\u914d\u7f6e\u3002',
+      confirmLabel: '\u786e\u8ba4\u8986\u76d6\u5bfc\u5165',
+      confirmVariant: 'btn-danger',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const response = await chrome.runtime.sendMessage({
+      type: 'IMPORT_SETTINGS',
+      source: 'sidepanel',
+      payload: {
+        config: parsedConfig,
+      },
+    });
+
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (!response?.state) {
+      throw new Error('\u5bfc\u5165\u540e\u672a\u8fd4\u56de\u6700\u65b0\u914d\u7f6e\u72b6\u6001\u3002');
+    }
+
+    applySettingsState(response.state);
+    updateStatusDisplay(latestState);
+    showToast('\u914d\u7f6e\u5df2\u5bfc\u5165\uff0c\u5f53\u524d\u914d\u7f6e\u5df2\u8986\u76d6\u3002', 'success', 2200);
+  } catch (err) {
+    showToast('\u5bfc\u5165\u914d\u7f6e\u5931\u8d25\uff1a' + err.message, 'error');
+  } finally {
+    configActionInFlight = false;
+    updateConfigMenuControls();
+    if (inputImportSettingsFile) {
+      inputImportSettingsFile.value = '';
+    }
+  }
+}
+
 async function deleteHotmailAccountsByMode(mode) {
   const isUsedMode = mode === 'used';
   const targetAccounts = getHotmailAccountsByUsage(isUsedMode ? 'used' : 'all');
@@ -1359,6 +1605,13 @@ function syncVpsUrlToggleLabel() {
   syncToggleButtonLabel(btnToggleVpsUrl, inputVpsUrl, {
     show: '显示 CPA 地址',
     hide: '隐藏 CPA 地址',
+  });
+}
+
+function syncVpsPasswordToggleLabel() {
+  syncToggleButtonLabel(btnToggleVpsPassword, inputVpsPassword, {
+    show: '显示管理密钥',
+    hide: '隐藏管理密钥',
   });
 }
 
@@ -1698,6 +1951,23 @@ btnToggleVpsUrl.addEventListener('click', () => {
   syncVpsUrlToggleLabel();
 });
 
+btnToggleVpsPassword.addEventListener('click', () => {
+  inputVpsPassword.type = inputVpsPassword.type === 'password' ? 'text' : 'password';
+  syncVpsPasswordToggleLabel();
+});
+
+localCpaStep9ModeButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const nextMode = button.dataset.localCpaStep9Mode;
+    if (getSelectedLocalCpaStep9Mode() === normalizeLocalCpaStep9Mode(nextMode)) {
+      return;
+    }
+    setLocalCpaStep9Mode(nextMode);
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 btnSaveSettings.addEventListener('click', async () => {
   if (!settingsDirty) {
     showToast('配置已是最新', 'info', 1400);
@@ -1710,6 +1980,38 @@ btnStop.addEventListener('click', async () => {
   btnStop.disabled = true;
   await chrome.runtime.sendMessage({ type: 'STOP_FLOW', source: 'sidepanel', payload: {} });
   showToast(isAutoRunScheduledPhase() ? '正在取消倒计时计划...' : '正在停止当前流程...', 'warn', 2000);
+});
+
+btnConfigMenu?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleConfigMenu();
+});
+
+configMenu?.addEventListener('click', (event) => {
+  event.stopPropagation();
+});
+
+btnExportSettings?.addEventListener('click', async () => {
+  if (configActionInFlight || settingsSaveInFlight) {
+    return;
+  }
+  await exportSettingsFile();
+});
+
+btnImportSettings?.addEventListener('click', async () => {
+  if (configActionInFlight || settingsSaveInFlight) {
+    return;
+  }
+  closeConfigMenu();
+  if (inputImportSettingsFile) {
+    inputImportSettingsFile.value = '';
+    inputImportSettingsFile.click();
+  }
+});
+
+inputImportSettingsFile?.addEventListener('change', async () => {
+  const file = inputImportSettingsFile.files?.[0] || null;
+  await importSettingsFromFile(file);
 });
 
 autoStartModal?.addEventListener('click', (event) => {
@@ -1727,7 +2029,8 @@ btnAutoRun.addEventListener('click', async () => {
 
     if (shouldOfferAutoModeChoice()) {
       const startStep = getFirstUnfinishedStep();
-      const choice = await openAutoStartChoiceDialog(startStep);
+      const runningStep = getRunningSteps()[0] ?? null;
+      const choice = await openAutoStartChoiceDialog(startStep, { runningStep });
       if (!choice) {
         return;
       }
@@ -1847,8 +2150,18 @@ inputEmail.addEventListener('change', async () => {
     return;
   }
   const email = inputEmail.value.trim();
-  if (email) {
-    await chrome.runtime.sendMessage({ type: 'SAVE_EMAIL', source: 'sidepanel', payload: { email } });
+  inputEmail.value = email;
+  try {
+    if (email) {
+      const response = await chrome.runtime.sendMessage({ type: 'SAVE_EMAIL', source: 'sidepanel', payload: { email } });
+      if (response?.error) {
+        throw new Error(response.error);
+      }
+    } else {
+      await setRuntimeEmailState(null);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 });
 inputEmail.addEventListener('input', updateButtonStates);
@@ -1885,6 +2198,7 @@ selectMailProvider.addEventListener('change', () => {
 
 selectEmailGenerator.addEventListener('change', () => {
   updateMailProviderUI();
+  clearRegistrationEmail({ silent: true }).catch(() => { });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -2072,6 +2386,9 @@ chrome.runtime.onMessage.addListener((message) => {
       if (message.payload.password !== undefined) {
         inputPassword.value = message.payload.password || '';
       }
+      if (message.payload.localCpaStep9Mode !== undefined) {
+        setLocalCpaStep9Mode(message.payload.localCpaStep9Mode);
+      }
       if (message.payload.oauthUrl !== undefined) {
         displayOauthUrl.textContent = message.payload.oauthUrl || '等待中...';
         displayOauthUrl.classList.toggle('has-value', Boolean(message.payload.oauthUrl));
@@ -2099,7 +2416,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
     case 'AUTO_RUN_STATUS': {
       syncLatestState({
-        autoRunning: ['scheduled', 'running', 'waiting_email', 'retrying'].includes(message.payload.phase),
+        autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying'].includes(message.payload.phase),
         autoRunPhase: message.payload.phase,
         autoRunCurrentRun: message.payload.currentRun,
         autoRunTotalRuns: message.payload.totalRuns,
@@ -2139,6 +2456,22 @@ btnTheme.addEventListener('click', () => {
   setTheme(current === 'dark' ? 'light' : 'dark');
 });
 
+document.addEventListener('click', (event) => {
+  if (!configMenuOpen) {
+    return;
+  }
+  if (configMenuShell?.contains(event.target)) {
+    return;
+  }
+  closeConfigMenu();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && configMenuOpen) {
+    closeConfigMenu();
+  }
+});
+
 // ============================================================
 // Init
 // ============================================================
@@ -2147,9 +2480,12 @@ initializeManualStepActions();
 initTheme();
 initHotmailListExpandedState();
 updateSaveButtonState();
+updateConfigMenuControls();
+setLocalCpaStep9Mode(DEFAULT_LOCAL_CPA_STEP9_MODE);
 restoreState().then(() => {
   syncPasswordToggleLabel();
   syncVpsUrlToggleLabel();
+  syncVpsPasswordToggleLabel();
   updatePanelModeUI();
   updateButtonStates();
   updateStatusDisplay(latestState);

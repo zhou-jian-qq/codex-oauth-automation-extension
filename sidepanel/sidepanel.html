@@ -58,11 +58,19 @@
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
         </svg>
       </button>
+      <div id="config-menu-shell" class="header-menu">
+        <button id="btn-config-menu" class="btn btn-ghost btn-sm header-config-btn" type="button" aria-haspopup="menu"
+          aria-expanded="false">配置</button>
+        <div id="config-menu" class="header-dropdown" role="menu" aria-labelledby="btn-config-menu" hidden>
+          <button id="btn-export-settings" class="header-dropdown-item" type="button" role="menuitem">导出配置</button>
+          <button id="btn-import-settings" class="header-dropdown-item" type="button" role="menuitem">导入配置</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <section id="data-section">
-    <div class="data-card">
+    <div id="settings-card" class="data-card">
       <div class="data-row">
         <span class="data-label">来源</span>
         <select id="select-panel-mode" class="data-select">
@@ -81,7 +89,18 @@
       </div>
       <div class="data-row" id="row-vps-password">
         <span class="data-label">管理密钥</span>
-        <input type="password" id="input-vps-password" class="data-input" placeholder="请输入 CPA 管理密钥" />
+        <div class="input-with-icon">
+          <input type="password" id="input-vps-password" class="data-input data-input-with-icon" placeholder="请输入 CPA 管理密钥" />
+          <button id="btn-toggle-vps-password" class="input-icon-btn" type="button" aria-label="显示管理密钥"
+            title="显示管理密钥"></button>
+        </div>
+      </div>
+      <div class="data-row" id="row-local-cpa-step9-mode">
+        <span class="data-label">本地 CPA</span>
+        <div id="local-cpa-step9-mode-group" class="choice-group" role="group" aria-label="本地 CPA 第 9 步策略">
+          <button type="button" class="choice-btn" data-local-cpa-step9-mode="submit">全部回调</button>
+          <button type="button" class="choice-btn" data-local-cpa-step9-mode="bypass">跳过第9步</button>
+        </div>
       </div>
       <div class="data-row" id="row-sub2api-url" style="display:none;">
         <span class="data-label">SUB2API</span>
@@ -101,14 +120,11 @@
       </div>
       <div class="data-row">
         <span class="data-label">codex密码</span>
-        <div class="data-inline">
-          <div class="input-with-icon">
-            <input type="password" id="input-password" class="data-input data-input-with-icon"
+        <div class="input-with-icon">
+          <input type="password" id="input-password" class="data-input data-input-with-icon"
               placeholder="codex密码，留空则自动生成" />
             <button id="btn-toggle-password" class="input-icon-btn" type="button" aria-label="显示密码"
               title="显示密码"></button>
-          </div>
-          <button id="btn-save-settings" class="btn btn-outline btn-sm" type="button">保存</button>
         </div>
       </div>
       <div class="data-row">
@@ -179,7 +195,10 @@
       </div>
       <div class="data-row">
         <span class="data-label">回调</span>
-        <span id="display-localhost-url" class="data-value mono truncate">等待中...</span>
+        <div class="data-inline data-value-actions">
+          <span id="display-localhost-url" class="data-value data-value-fill mono truncate">等待中...</span>
+          <button id="btn-save-settings" class="btn btn-outline btn-sm" type="button">保存</button>
+        </div>
       </div>
     </div>
     <div id="hotmail-section" class="data-card hotmail-card" style="display:none;">
@@ -332,6 +351,7 @@
   </div>
 
   <div id="toast-container"></div>
+  <input id="input-import-settings-file" type="file" accept=".json,application/json" hidden />
   <script src="../hotmail-utils.js"></script>
   <script src="sidepanel.js"></script>
 </body>
