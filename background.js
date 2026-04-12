@@ -1010,6 +1010,7 @@ function isVerificationMailPollingError(error) {
 }
 
 const STEP7_RESTART_FROM_STEP6_ERROR_CODE = 'STEP7_RESTART_FROM_STEP6';
+const STEP7_RESTART_FROM_STEP6_MARKER_PATTERN = /^STEP7_RESTART_FROM_STEP6::([^:]+)::(.*)$/;
 
 function createStep7RestartFromStep6Error(details = {}) {
   const { reason = 'unknown', url = '' } = details || {};
@@ -1023,15 +1024,35 @@ function createStep7RestartFromStep6Error(details = {}) {
   return error;
 }
 
-function getStep7RestartFromStep6Error(result) {
-  if (!result?.restartFromStep6) {
+function parseStep7RestartFromStep6Marker(message) {
+  const normalized = getErrorMessage(message);
+  const match = normalized.match(STEP7_RESTART_FROM_STEP6_MARKER_PATTERN);
+  if (!match) {
     return null;
   }
-  return createStep7RestartFromStep6Error(result);
+
+  return {
+    reason: match[1] || 'unknown',
+    url: match[2] || '',
+  };
+}
+
+function getStep7RestartFromStep6Error(result) {
+  if (result?.restartFromStep6) {
+    return createStep7RestartFromStep6Error(result);
+  }
+
+  const parsed = parseStep7RestartFromStep6Marker(result?.error);
+  if (!parsed) {
+    return null;
+  }
+
+  return createStep7RestartFromStep6Error(parsed);
 }
 
 function isStep7RestartFromStep6Error(error) {
-  return error?.code === STEP7_RESTART_FROM_STEP6_ERROR_CODE;
+  return error?.code === STEP7_RESTART_FROM_STEP6_ERROR_CODE
+    || Boolean(parseStep7RestartFromStep6Marker(error));
 }
 
 function isStep7RecoverableError(error) {
@@ -2564,15 +2585,15 @@ async function requestVerificationCodeResend(step) {
     payload: {},
   });
 
-  if (result && result.error) {
-    throw new Error(result.error);
-  }
-
   if (step === 7) {
     const restartError = getStep7RestartFromStep6Error(result);
     if (restartError) {
       throw restartError;
     }
+  }
+
+  if (result && result.error) {
+    throw new Error(result.error);
   }
 
   return Date.now();
@@ -2657,15 +2678,15 @@ async function submitVerificationCode(step, code) {
     payload: { code },
   });
 
-  if (result && result.error) {
-    throw new Error(result.error);
-  }
-
   if (step === 7) {
     const restartError = getStep7RestartFromStep6Error(result);
     if (restartError) {
       throw restartError;
     }
+  }
+
+  if (result && result.error) {
+    throw new Error(result.error);
   }
 
   return result || {};
@@ -2882,13 +2903,13 @@ async function runStep7Attempt(state) {
     payload: {},
   });
 
-  if (prepareResult && prepareResult.error) {
-    throw new Error(prepareResult.error);
-  }
-
   const restartError = getStep7RestartFromStep6Error(prepareResult);
   if (restartError) {
     throw restartError;
+  }
+
+  if (prepareResult && prepareResult.error) {
+    throw new Error(prepareResult.error);
   }
 
   await addLog(`步骤 7：正在打开${mail.label}...`);

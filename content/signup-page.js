@@ -658,12 +658,17 @@ function isSignupPasswordErrorPage() {
   return matchesAuthTimeoutErrorPage(/\/create-account\/password(?:[/?#]|$)/i);
 }
 
+function buildStep7RestartFromStep6Marker(reason, url = location.href) {
+  return `STEP7_RESTART_FROM_STEP6::${reason || 'unknown'}::${url || ''}`;
+}
+
 function getStep7RestartFromStep6Signal() {
   if (!isLoginPage() || !matchesAuthTimeoutErrorPage(/\/log-in(?:[/?#]|$)/i)) {
     return null;
   }
 
   return {
+    error: buildStep7RestartFromStep6Marker('login_timeout_error_page', location.href),
     restartFromStep6: true,
     reason: 'login_timeout_error_page',
     url: location.href,
