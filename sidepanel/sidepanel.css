@@ -1785,6 +1785,12 @@ header {
   border-color: color-mix(in srgb, var(--blue) 16%, var(--border));
 }
 
+.account-records-stat.is-stopped {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 16%, var(--border));
+}
+
 .account-records-list {
   display: flex;
   flex-direction: column;
@@ -1906,6 +1912,15 @@ header {
 .account-record-item.is-failed .account-record-item-status {
   background: var(--red-soft);
   color: var(--red);
+}
+
+.account-record-item.is-stopped {
+  border-color: color-mix(in srgb, var(--amber) 14%, var(--border-subtle));
+}
+
+.account-record-item.is-stopped .account-record-item-status {
+  background: var(--amber-soft);
+  color: var(--amber);
 }
 
 .account-records-pagination {

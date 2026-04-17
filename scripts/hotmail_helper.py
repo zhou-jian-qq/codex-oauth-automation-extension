@@ -145,7 +145,7 @@ def normalize_account_run_snapshot_record(record):
     email_addr = str(record.get("email") or "").strip()
     password = str(record.get("password") or "").strip()
     final_status = str(record.get("finalStatus") or "").strip().lower()
-    if not email_addr or not password or final_status not in {"success", "failed"}:
+    if not email_addr or not password or final_status not in {"success", "failed", "stopped"}:
         return None
 
     finished_at = str(record.get("finishedAt") or "").strip() or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

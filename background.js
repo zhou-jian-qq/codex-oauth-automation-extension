@@ -1066,6 +1066,7 @@ async function setEmailStateSilently(email) {
 async function setEmailState(email) {
   await setEmailStateSilently(email);
   if (email) {
+    await appendManualAccountRunRecordIfNeeded('step2_stopped', null, '步骤 2 已使用邮箱，流程尚未完成。');
     await resumeAutoRunIfWaitingForEmail();
   }
 }
@@ -4696,10 +4697,6 @@ async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null
   }
 
   const state = stateOverride || await getState();
-  if (isAutoRunLockedState(state)) {
-    return null;
-  }
-
   return appendAndBroadcastAccountRunRecord(status, state, reason);
 }
 

@@ -72,8 +72,11 @@
       if (finalStatus === 'success') {
         return '流程完成';
       }
+      if (finalStatus === 'stopped') {
+        return '流程已停止';
+      }
       if (finalStatus !== 'failed') {
-        return '';
+        return '无';
       }
       if (isPhoneVerificationFailure(failureDetail)) {
         return '出现手机号验证';
@@ -138,12 +141,12 @@
       const password = String(record.password || '').trim();
       const finalStatus = normalizeFinalStatus(record.finalStatus || record.status || '');
 
-      if (!email || !password || !finalStatus || finalStatus === 'stopped') {
+      if (!email || !password || !finalStatus) {
         return null;
       }
 
       const finishedAt = String(record.finishedAt || record.recordedAt || '').trim();
-      const failureDetail = finalStatus === 'failed'
+      const failureDetail = finalStatus === 'failed' || finalStatus === 'stopped'
         ? String(record.failureDetail || record.reason || '').trim()
         : '';
       const failedStepCandidate = Number(record.failedStep);
@@ -204,14 +207,14 @@
 
     function buildAccountRunHistoryRecord(state = {}, status = '', reason = '') {
       const email = String(state.email || '').trim();
-      const password = String(state.password || state.customPassword || '').trim();
+      const password = String(state.password || state.customPassword || '').trim() || '无';
       const finalStatus = normalizeFinalStatus(status);
 
-      if (!email || !password || !finalStatus || finalStatus === 'stopped') {
+      if (!email || !finalStatus) {
         return null;
       }
 
-      const failureDetail = finalStatus === 'failed' ? String(reason || '').trim() : '';
+      const failureDetail = finalStatus === 'failed' || finalStatus === 'stopped' ? String(reason || '').trim() : '';
       const failedStep = finalStatus === 'failed' ? extractFailedStep(status, failureDetail) : null;
       const source = Boolean(state.autoRunning) ? 'auto' : 'manual';
       const autoRunContext = source === 'auto' ? buildAutoRunContextFromState(state) : null;
@@ -271,6 +274,8 @@
           summary.success += 1;
         } else if (record.finalStatus === 'failed') {
           summary.failed += 1;
+        } else if (record.finalStatus === 'stopped') {
+          summary.stopped += 1;
         }
         summary.retryTotal += normalizeRetryCount(record.retryCount);
         return summary;
@@ -278,6 +283,7 @@
         total: 0,
         success: 0,
         failed: 0,
+        stopped: 0,
         retryTotal: 0,
       });
     }
