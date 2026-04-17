@@ -1235,24 +1235,7 @@ function createStep6RecoverableResult(reason, snapshot, options = {}) {
 }
 
 async function createStep6LoginTimeoutRecoverableResult(reason, snapshot, message) {
-  const resolvedSnapshot = normalizeStep6Snapshot(snapshot || inspectLoginAuthState());
-  if (resolvedSnapshot?.state === 'login_timeout_error_page') {
-    try {
-      const recoveryResult = await recoverCurrentAuthRetryPage({
-        flow: 'login',
-        logLabel: '步骤 7：检测到登录超时报错，正在点击“重试”恢复当前页面',
-        step: 6,
-        timeoutMs: 12000,
-      });
-      if (recoveryResult?.recovered) {
-        log('步骤 7：登录超时报错页已点击“重试”，准备重新执行当前步骤。', 'warn');
-      }
-    } catch (error) {
-      log(`步骤 7：登录超时报错页自动点击“重试”失败：${error.message}`, 'warn');
-    }
-  }
-
-  return createStep6RecoverableResult(reason, resolvedSnapshot, {
+  return createStep6RecoverableResult(reason, normalizeStep6Snapshot(snapshot || inspectLoginAuthState()), {
     message,
   });
 }

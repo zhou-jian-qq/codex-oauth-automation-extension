@@ -125,6 +125,11 @@
       }
     }
 
+    function isStep8RestartStep7Error(error) {
+      const message = String(error?.message || error || '');
+      return /STEP8_RESTART_STEP7::/i.test(message);
+    }
+
     async function executeStep8(state) {
       let currentState = state;
       let mailPollingAttempt = 1;
@@ -135,7 +140,7 @@
           await runStep8Attempt(currentState);
           return;
         } catch (err) {
-          if (!isVerificationMailPollingError(err)) {
+          if (!isVerificationMailPollingError(err) && !isStep8RestartStep7Error(err)) {
             throw err;
           }
 
@@ -146,10 +151,16 @@
 
           mailPollingAttempt += 1;
           await addLog(
-            `步骤 8：检测到邮箱轮询类失败，准备从步骤 7 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`,
+            isStep8RestartStep7Error(err)
+              ? `步骤 8：检测到认证页进入重试/超时报错状态，准备从步骤 7 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`
+              : `步骤 8：检测到邮箱轮询类失败，准备从步骤 7 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`,
             'warn'
           );
-          await rerunStep7ForStep8Recovery();
+          await rerunStep7ForStep8Recovery({
+            logMessage: isStep8RestartStep7Error(err)
+              ? '步骤 8：认证页进入重试/超时报错状态，正在回到步骤 7 重新发起登录流程...'
+              : '步骤 8：正在回到步骤 7，重新发起登录验证码流程...',
+          });
           currentState = await getState();
         }
       }

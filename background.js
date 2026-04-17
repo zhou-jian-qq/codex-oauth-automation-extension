@@ -6430,6 +6430,11 @@ async function ensureStep8VerificationPageReady(options = {}) {
     return pageState;
   }
 
+  if (pageState.state === 'login_timeout_error_page') {
+    const urlPart = pageState.url ? ` URL: ${pageState.url}` : '';
+    throw new Error(`STEP8_RESTART_STEP7::步骤 8：当前认证页进入登录超时报错页，请回到步骤 7 重新开始。${urlPart}`.trim());
+  }
+
   const stateLabel = getLoginAuthStateLabel(pageState.state);
   const urlPart = pageState.url ? ` URL: ${pageState.url}` : '';
   throw new Error(`当前未进入登录验证码页面，请先重新完成步骤 7。当前状态：${stateLabel}.${urlPart}`.trim());
